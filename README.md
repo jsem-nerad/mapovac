@@ -1,0 +1,1 @@
+# mapy-com-utils
