@@ -44,30 +44,6 @@ def get_tile_width_m(lat, zoom):
     """Returns the width of a tile in meters at a given latitude and zoom."""
     return (EQUATOR_CIRCUMFERENCE * math.cos(math.radians(lat))) / (2.0 ** zoom)
 
-def calculate_best_zoom(lat, target_tiles_per_km):
-    """
-    Finds the integer zoom level that most closely matches the target resolution.
-    target_tiles_per_km = 1000 / target_tile_width_meters
-    """
-    target_tile_width_m = 1000.0 / target_tiles_per_km
-    
-    # TileWidth = C * cos(lat) / 2^z
-    # 2^z = C * cos(lat) / TileWidth
-    # z = log2(C * cos(lat) / TileWidth)
-    
-    ideal_zoom = math.log2((EQUATOR_CIRCUMFERENCE * math.cos(math.radians(lat))) / target_tile_width_m)
-    return max(0, min(20, round(ideal_zoom)))
-
-def download_tile(z, x, y, apikey, mapset="basic"):
-    url = f"https://api.mapy.com/v1/maptiles/{mapset}/256/{z}/{x}/{y}?apikey={apikey}"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return Image.open(BytesIO(response.content))
-    except Exception as e:
-        console.print(f"[red]Error downloading tile {z}/{x}/{y}: {e}[/red]")
-        return None
-
 BANNER = """
  ██████   ██████                                                            
 ░░██████ ██████                                                             
@@ -103,7 +79,7 @@ def save_config(config):
     except:
         pass
 
-def download_tile(z, x, y, apikey, mapset="basic"):
+def _get_single_tile(z, x, y, apikey, mapset):
     # Cache path: ~/.mapovac/cache/{mapset}/{z}/{x}/{y}.png
     cache_path = os.path.join(CACHE_DIR, mapset, str(z), str(x), f"{y}.png")
     
@@ -126,8 +102,25 @@ def download_tile(z, x, y, apikey, mapset="basic"):
             
         return Image.open(BytesIO(response.content))
     except Exception as e:
-        console.print(f"[red]Error downloading tile {z}/{x}/{y}: {e}[/red]")
+        console.print(f"[red]Error downloading tile {z}/{x}/{y} ({mapset}): {e}[/red]")
         return None
+
+def download_tile(z, x, y, apikey, mapset="basic"):
+    # If mapset is a list or tuple, we need to download multiple and composite them
+    if isinstance(mapset, (list, tuple)):
+        base_img = None
+        for sub_mapset in mapset:
+            img = _get_single_tile(z, x, y, apikey, sub_mapset)
+            if img:
+                if base_img is None:
+                    base_img = img.convert("RGBA")
+                else:
+                    # Overlay the next layer
+                    overlay = img.convert("RGBA")
+                    base_img.alpha_composite(overlay)
+        return base_img.convert("RGB") if base_img else None
+    else:
+        return _get_single_tile(z, x, y, apikey, mapset)
 
 def get_apikey(config):
     # 1. Check environment
@@ -175,7 +168,29 @@ def run_tui():
         if lon_str is None: sys.exit(0)
         lon = float(lon_str)
         
-        # Consolidate Zoom prompt with a separate display for live feedback
+        # Map Layer Selection
+        mapset_choice = questionary.select(
+            "Select Map Layer:",
+            choices=[
+                "Basic",
+                "Outdoor",
+                "Winter",
+                "Aerial",
+                "Aerial with Labels"
+            ],
+            default=config.get("mapset_name", "Basic")
+        ).ask()
+        
+        mapset_map = {
+            "Basic": "basic",
+            "Outdoor": "outdoor",
+            "Winter": "winter",
+            "Aerial": "aerial",
+            "Aerial with Labels": ["aerial", "names-overlay"]
+        }
+        mapset = mapset_map[mapset_choice]
+        
+        # Consolidate Zoom prompt with a separate display for scale info
         console.print(f"\n[bold blue]Map scale reference at latitude {lat}:[/bold blue]")
         for z in [0, 5, 10, 15, 18, 20]:
             dist = get_tile_width_m(lat, z)
@@ -238,11 +253,12 @@ def run_tui():
             "size_km": size_km,
             "aspect_choice": aspect_choice,
             "aspect_ratio": aspect_ratio,
-            "output": output
+            "output": output,
+            "mapset_name": mapset_choice
         })
         save_config(config)
         
-        return apikey, lat, lon, size_km, zoom, aspect_ratio, output
+        return apikey, lat, lon, size_km, zoom, aspect_ratio, output, mapset
     except KeyboardInterrupt:
         sys.exit(0)
     except ValueError:
@@ -256,21 +272,24 @@ def main():
     parser.add_argument("--size", type=float, help="Width of the map in km")
     parser.add_argument("--zoom", type=int, help="Zoom level (0-20)")
     parser.add_argument("--aspect", type=float, default=1.0, help="Aspect ratio (Width/Height), default 1.0")
+    parser.add_argument("--mapset", type=str, default="basic", help="Map layer (basic, outdoor, winter, aerial). Use 'aerial,names-overlay' for labels.")
     parser.add_argument("--apikey", type=str, help="Mapy.com API Key")
     parser.add_argument("--output", type=str, default="map.png", help="Output filename")
     
     args = parser.parse_args()
+    config = load_config()
     
     if len(sys.argv) == 1:
-        apikey, lat, lon, size_km, zoom, aspect_ratio, output = run_tui()
+        apikey, lat, lon, size_km, zoom, aspect_ratio, output, mapset = run_tui()
     else:
-        apikey = args.apikey or os.getenv("MAPY_API_KEY")
+        apikey = args.apikey or get_apikey(config)
         lat = args.lat
         lon = args.lon
         size_km = args.size
         zoom = args.zoom
         aspect_ratio = args.aspect
         output = args.output
+        mapset = args.mapset.split(",") if "," in args.mapset else args.mapset
         
         if not all([apikey, lat, lon, size_km, zoom is not None]):
             parser.print_help()
@@ -281,9 +300,9 @@ def main():
     
     console.print(f"\n[green]Zoom Level:[/green] {zoom}")
     console.print(f"[green]Scale:[/green] {tile_width_m:.2f} meters per tile")
+    console.print(f"[green]Map Layer:[/green] {mapset}")
 
-    # 3. Calculate pixel dimensions based on aspect ratio
-    # Size_km is now defined as WIDTH
+    # 2. Calculate pixel dimensions based on aspect ratio
     width_km = size_km
     height_km = width_km / aspect_ratio
     
@@ -298,7 +317,7 @@ def main():
     right_px = left_px + width_px
     bottom_py = top_py + height_px
     
-    # 4. Determine required tiles
+    # 3. Determine required tiles
     start_tx, start_ty, _, _ = pixel_to_tile(left_px, top_py)
     end_tx, end_ty, _, _ = pixel_to_tile(right_px, bottom_py)
     
@@ -309,7 +328,7 @@ def main():
             
     console.print(f"[green]Tiles to download:[/green] {len(tiles_to_fetch)} ({end_tx-start_tx+1}x{end_ty-start_ty+1} grid)")
 
-    # 5. Download Tiles
+    # 4. Download Tiles
     tile_images = {}
     with Progress(
         SpinnerColumn(),
@@ -322,7 +341,7 @@ def main():
         
         def fetch_and_store(coords):
             tx, ty = coords
-            img = download_tile(zoom, tx, ty, apikey)
+            img = download_tile(zoom, tx, ty, apikey, mapset=mapset)
             if img:
                 tile_images[(tx, ty)] = img
             progress.update(task, advance=1)
@@ -330,7 +349,7 @@ def main():
         with ThreadPoolExecutor(max_workers=10) as executor:
             executor.map(fetch_and_store, tiles_to_fetch)
 
-    # 6. Stitching
+    # 5. Stitching
     console.print("[yellow]Stitching tiles...[/yellow]")
     full_width = (end_tx - start_tx + 1) * TILE_SIZE
     full_height = (end_ty - start_ty + 1) * TILE_SIZE
@@ -341,7 +360,7 @@ def main():
         oy = (ty - start_ty) * TILE_SIZE
         canvas.paste(img, (ox, oy))
         
-    # 7. Precise Cropping
+    # 6. Precise Cropping
     console.print("[yellow]Cropping to final size...[/yellow]")
     # Offset of our bounding box within the stitched canvas
     crop_left = left_px - (start_tx * TILE_SIZE)
