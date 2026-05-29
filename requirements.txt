@@ -3,3 +3,4 @@ Pillow
 rich
 questionary
 python-dotenv
+cryptography

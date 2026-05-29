@@ -19,10 +19,13 @@
 ## Hlavní funkce
 
 - **Přesné měřítko:** Nastavte si úroveň přiblížení (zoom 0–20) a získejte okamžitou informaci o fyzické velikosti (metry na dlaždici) pro danou zeměpisnou šířku.
-- **Flexibilní formáty:** Podpora různých poměrů stran – od čtverce až po 16:9 nebo tiskový formát A4 (nebo vlastní poměr stran).
-- **Caching:** Stažené dlaždice se ukládají do složky `~/.mapovac/cache/`, takže opakované generování stejné oblasti nespotřebuje žádné kredity.
-- **Trvalé nastavení:** Nástroj si pamatuje vaše poslední zadané hodnoty (souřadnice, zoom, API klíč), takže při dalším spuštění stačí jen potvrzovat klávesou Enter.
-- **TUI i CLI režim:** Interaktivní rozhraní pro lidi a parametry příkazové řádky pro automatizaci.
+- **Vysoké rozlišení (Retina):** Podpora `@2x` dlaždic pro extrémně ostré mapy vhodné pro tisk.
+- **Tiskové předvolby:** Snadné generování map ve formátech A4/A3 s automatickým výpočtem ideálního přiblížení pro 300 DPI.
+- **Kartografické doplňky:** Volitelná měřítková lišta a tiráž (citace) přímo v obrázku.
+- **Export do PDF:** Podpora ukládání přímo do PDF pro snadný tisk.
+- **Zabezpečení:** API klíč je v konfiguračním souboru uložen šifrovaně.
+- **Robustní stahování:** Automatické opakování pokusů (retry) při výpadku sítě.
+- **Caching:** Stažené dlaždice se ukládají do složky `~/.mapovac/cache/`.
 
 ## Instalace
 
@@ -49,13 +52,18 @@ Stačí spustit skript bez parametrů. Program vás provede nastavením:
 ### Automatizovaný režim (CLI)
 Pro rychlé spuštění s konkrétními parametry:
 ```bash
-./venv/bin/python3 mapovac.py --lat 50.0755 --lon 14.4378 --size 2 --zoom 16 --aspect 1.777 --output praha.png
+./venv/bin/python3 mapovac.py --lat 50.0755 --lon 14.4378 --size 2 --zoom 16 --aspect 1.777 --retina --output praha.png
 ```
 *Argumenty:*
 - `--lat`, `--lon`: Souřadnice středu mapy.
 - `--size`: Šířka mapy v kilometrech.
-- `--zoom`: Úroveň přiblížení (0-20).
+- `--zoom`: Úroveň přiblížení dlaždic (0-20).
 - `--aspect`: Poměr stran (šířka/výška).
+- `--retina`: Použít dlaždice ve vysokém rozlišení (2x).
+- `--scale`: Přidat měřítkovou lištu.
+- `--scale-pos`: Pozice lišty (`bottom-left`, `bottom-right`, `top-left`, `top-right`).
+- `--attribution`: Přidat tiráž (citaci).
+- `--attr-pos`: Pozice tiráže.
 - `--output`: Název výsledného souboru.
 
 ## API Klíč
